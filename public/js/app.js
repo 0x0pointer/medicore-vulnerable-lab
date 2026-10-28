@@ -56,7 +56,7 @@ let ME = null;
 function switchView(view) {
   document.querySelectorAll('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.view === view));
   document.getElementById('sidebar').classList.remove('open');
-  ({ dashboard: viewDashboard, patients: viewPatients, records: viewRecords, messages: viewMessages, prescriptions: viewPrescriptions, admin: viewAdmin }[view] || viewDashboard)();
+  ({ dashboard: viewDashboard, patients: viewPatients, records: viewRecords, messages: viewMessages, prescriptions: viewPrescriptions, appointments: viewAppointments, admin: viewAdmin }[view] || viewDashboard)();
 }
 
 // ---- Dashboard -----------------------------------------------
@@ -402,6 +402,88 @@ async function renderPrescriptions() {
       <td>${esc(r.prescriber || '—')}</td>
       <td style="color:var(--text-soft)">${r.notes || ''}</td>
     </tr>`).join('');
+}
+
+// ---- Appointments --------------------------------------------
+async function viewAppointments() {
+  content.innerHTML = `
+    <div class="page-head">
+      <div><h1>Appointments</h1><p>Upcoming visits and telehealth sessions.</p></div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Schedule</h3><span class="sub" id="apCount"></span></div>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>When</th><th>Patient</th><th>Reason</th><th>Location</th><th>Status</th><th></th></tr></thead>
+          <tbody id="apBody"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+      <div class="card card-pad">
+        <div class="section-title">Book appointment</div>
+        <form id="apForm" style="display:grid;gap:8px">
+          <input id="apPatient" type="number" placeholder="Patient id (e.g. 1)" value="1" />
+          <input id="apWhen" type="datetime-local" />
+          <input id="apReason" placeholder="Reason for visit" />
+          <select id="apLocation" style="padding:10px 12px;border:1px solid var(--border-strong);border-radius:10px;font-size:14px">
+            <option>Clinic</option><option>Telehealth</option><option>Day Unit</option>
+          </select>
+          <button class="btn btn-primary btn-sm" type="submit">Book</button>
+        </form>
+      </div>
+    </div>`;
+
+  await renderAppointments();
+
+  document.getElementById('apForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const when = document.getElementById('apWhen').value;
+    if (!when) return;
+    await api('/api/appointments', {
+      method: 'POST',
+      body: JSON.stringify({
+        patient_id: Number(document.getElementById('apPatient').value),
+        starts_at: new Date(when).toISOString(),
+        reason: document.getElementById('apReason').value,
+        location: document.getElementById('apLocation').value,
+      }),
+    });
+    document.getElementById('apForm').reset();
+    document.getElementById('apPatient').value = '1';
+    await renderAppointments();
+  });
+}
+
+async function renderAppointments() {
+  const body = document.getElementById('apBody');
+  const [appts, patients] = await Promise.all([api('/api/appointments'), api('/api/patients')]);
+  const names = Object.fromEntries(patients.map((p) => [p.id, p.full_name]));
+  document.getElementById('apCount').textContent = `${appts.length} visit${appts.length === 1 ? '' : 's'}`;
+  if (!appts.length) { body.innerHTML = '<tr><td colspan="6" class="empty">No appointments.</td></tr>'; return; }
+  body.innerHTML = '';
+  appts.forEach((a) => {
+    const telehealth = (a.location || '').toLowerCase() === 'telehealth';
+    // telehealth "join" goes through the server redirect endpoint
+    const joinHref = `/api/appointments/${a.id}/join?next=` +
+      encodeURIComponent('https://meet.medicore.test/room/' + a.id);
+    const tr = el(`<tr>
+      <td>${esc(fmt(a.starts_at))}</td>
+      <td>${esc(names[a.patient_id] || ('Patient #' + a.patient_id))}</td>
+      <td>${esc(a.reason || '—')}</td>
+      <td>${esc(a.location || '—')}</td>
+      <td><span class="pill ${a.status === 'cancelled' ? 'discharged' : 'active'}">${esc(a.status)}</span></td>
+      <td style="text-align:right;white-space:nowrap">
+        ${telehealth && a.status !== 'cancelled' ? `<a class="btn btn-ghost btn-sm" href="${joinHref}" target="_blank" rel="noopener">Join</a>` : ''}
+        ${a.status !== 'cancelled' ? `<button class="btn btn-ghost btn-sm js-cancel" data-id="${a.id}">Cancel</button>` : ''}
+      </td>
+    </tr>`);
+    const cancelBtn = tr.querySelector('.js-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      await api('/api/appointments/' + cancelBtn.dataset.id + '/cancel', { method: 'POST' });
+      await renderAppointments();
+    });
+    body.appendChild(tr);
+  });
 }
 
 // ---- Admin ---------------------------------------------------
