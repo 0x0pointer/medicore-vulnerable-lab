@@ -1,0 +1,4 @@
+MediCore — Pathology Report
+Patient: Priya Nair (MRN-100455)
+Specimen: Left breast core biopsy
+Finding: Invasive ductal carcinoma, grade 2. ER+/PR+/HER2-.

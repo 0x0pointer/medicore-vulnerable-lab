@@ -1,0 +1,32 @@
+{
+  "name": "medicore-vulnerable-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MediCore — a DELIBERATELY VULNERABLE healthcare web application for security training, CTF practice, and scanner testing. Not for production use.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node db/seed.js",
+    "dev": "node db/seed.js && node server.js"
+  },
+  "keywords": [
+    "security",
+    "training",
+    "vulnerable",
+    "owasp",
+    "appsec",
+    "ctf",
+    "healthcare",
+    "demo"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

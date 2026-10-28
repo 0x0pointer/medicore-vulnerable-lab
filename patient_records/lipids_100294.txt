@@ -1,0 +1,4 @@
+MediCore — Lipid Panel
+Patient: Grace Thornton (MRN-100294)
+Total cholesterol: 212 mg/dL   LDL: 134   HDL: 51   Triglycerides: 160
+Note: Consider statin optimization.

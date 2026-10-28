@@ -1,0 +1,5 @@
+MediCore — 12-Lead ECG Report
+Patient: Grace Thornton (MRN-100294)
+Rhythm: Atrial fibrillation, controlled ventricular response ~78 bpm
+QTc: 441 ms  |  Axis: normal
+Interpretation: No acute ST-T changes. Consistent with known AF.

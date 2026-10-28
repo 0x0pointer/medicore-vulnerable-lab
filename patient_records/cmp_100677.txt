@@ -1,0 +1,4 @@
+MediCore — Comprehensive Metabolic Panel
+Patient: William Chen (MRN-100677)
+Creatinine: 2.4 mg/dL (high)   eGFR: 29   Potassium: 5.3 (high)
+Note: Consistent with CKD stage 4. Nephrology follow-up advised.
