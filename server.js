@@ -30,6 +30,21 @@ if (!fs.existsSync(DB_PATH)) {
 }
 const db = new Database(DB_PATH);
 
+// Ensure the appointments table exists even on an older seeded database,
+// so this feature branch runs without re-seeding.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS appointments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    clinician TEXT NOT NULL,
+    starts_at TEXT NOT NULL,
+    reason TEXT,
+    location TEXT,
+    status TEXT DEFAULT 'scheduled',
+    created_at TEXT NOT NULL
+  );
+`);
+
 /* -----------------------------------------------------------------------
  * VULN #4 — Broken Authentication: hard-coded, trivially-weak JWT secret
  *           committed to source control. Anyone who reads the repo can
@@ -278,6 +293,54 @@ app.post('/api/admin/network-check', requireLogin, (req, res) => {
 });
 
 // =========================================================================
+
+// =========================================================================
+//  APPOINTMENTS  (feature: scheduling & telehealth)
+// =========================================================================
+
+// List appointments. Parameterized query, fields escaped on the client — safe.
+app.get('/api/appointments', requireLogin, (req, res) => {
+  const pid = req.query.patient_id;
+  const rows = pid
+    ? db.prepare('SELECT * FROM appointments WHERE patient_id = ? ORDER BY starts_at').all(pid)
+    : db.prepare('SELECT * FROM appointments ORDER BY starts_at').all();
+  res.json(rows);
+});
+
+// Create an appointment. Explicit column binding with placeholders — safe.
+app.post('/api/appointments', requireLogin, (req, res) => {
+  const { patient_id, starts_at, reason = '', location = 'Clinic' } = req.body;
+  if (!patient_id || !starts_at) return res.status(400).json({ error: 'patient_id and starts_at are required' });
+  const info = db.prepare(
+    `INSERT INTO appointments (patient_id, clinician, starts_at, reason, location, status, created_at)
+     VALUES (?, ?, ?, ?, ?, 'scheduled', ?)`
+  ).run(patient_id, req.user.name, starts_at, reason, location, new Date().toISOString());
+  res.json(db.prepare('SELECT * FROM appointments WHERE id = ?').get(info.lastInsertRowid));
+});
+
+/*
+ * VULN #A — IDOR / Broken Object-Level Authorization: any authenticated user
+ *           can cancel ANY appointment by id. The handler never checks that
+ *           the appointment belongs to the requesting clinician (or that the
+ *           user is allowed to touch that patient).              (CWE-639)
+ */
+app.post('/api/appointments/:id/cancel', requireLogin, (req, res) => {
+  const appt = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
+  if (!appt) return res.status(404).json({ error: 'Appointment not found' });
+  db.prepare("UPDATE appointments SET status = 'cancelled' WHERE id = ?").run(req.params.id);
+  res.json({ ok: true, id: Number(req.params.id), status: 'cancelled' });
+});
+
+/*
+ * VULN #B — Open Redirect: the telehealth "join" link bounces the user to a
+ *           URL taken straight from the `next` query parameter with no
+ *           allow-list, so a crafted link sends the victim to an attacker
+ *           site under the trusted MediCore domain.             (CWE-601)
+ */
+app.get('/api/appointments/:id/join', requireLogin, (req, res) => {
+  const next = req.query.next || '/app.html';
+  res.redirect(next);
+});
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'medicore' }));
 

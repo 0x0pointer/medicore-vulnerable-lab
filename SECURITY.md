@@ -238,6 +238,53 @@ add security headers (e.g. via `helmet`) incl. a strict CSP.
 
 ---
 
+## Appointments module (feature branch additions)
+
+The scheduling & telehealth feature adds exactly **two** vulnerabilities. The
+rest of the module (listing, creation) is written securely — parameterized
+queries and escaped output — so these two are the only planted bugs.
+
+### #A — IDOR / Broken Object-Level Authorization · `CWE-639` · OWASP A01
+
+**Where:** `server.js` → `POST /api/appointments/:id/cancel`.
+
+The handler cancels an appointment by id without checking that it belongs to
+the requesting clinician (or that they may touch that patient).
+
+**Exploit:** as any user, cancel someone else's appointment by walking ids:
+
+```bash
+curl -s --cookie "session=$TOKEN" -X POST \
+  http://localhost:3000/api/appointments/3/cancel
+# → {"ok":true,"id":3,"status":"cancelled"}  (appt 3 belongs to Dr. Patel)
+```
+
+**Fix:** verify ownership/authorization before mutating —
+`UPDATE … WHERE id = ? AND clinician = ?`, or an explicit access check.
+
+### #B — Open Redirect · `CWE-601` · OWASP A01
+
+**Where:** `server.js` → `GET /api/appointments/:id/join`.
+
+The telehealth "join" link redirects to whatever `next` contains, with no
+allow-list:
+
+```js
+res.redirect(req.query.next || '/app.html');
+```
+
+**Exploit:** a link on the trusted MediCore origin that lands on an attacker
+site (useful for phishing / OAuth-token theft):
+
+```
+http://localhost:3000/api/appointments/1/join?next=https://evil.example/login
+```
+
+**Fix:** only redirect to a relative path or a host on an allow-list; reject
+absolute/external URLs (and protocol-relative `//evil.example`).
+
+---
+
 ## Remediation checklist
 
 - [ ] #1 Parameterized queries everywhere

@@ -78,6 +78,17 @@ db.exec(`
     body TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE appointments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    clinician TEXT NOT NULL,
+    starts_at TEXT NOT NULL,
+    reason TEXT,
+    location TEXT,
+    status TEXT DEFAULT 'scheduled',
+    created_at TEXT NOT NULL
+  );
 `);
 
 const users = [
@@ -135,6 +146,16 @@ const insMsg = db.prepare(
 );
 insMsg.run('Dr. Alice Reed', 'Reminder: quarterly compliance training is due Friday.', now());
 insMsg.run('Tom Hill (Billing)', 'Insurance pre-auth for MRN-100455 is pending.', now());
+
+const soon = (days, hour) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
+const insAppt = db.prepare(
+  `INSERT INTO appointments (patient_id, clinician, starts_at, reason, location, status, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`
+);
+insAppt.run(1, 'Dr. James Carter', soon(1, 9),  'AF follow-up',          'Cardiology Clinic, Rm 2', 'scheduled', now());
+insAppt.run(2, 'Dr. James Carter', soon(2, 11), 'Diabetes review',       'Telehealth',              'scheduled', now());
+insAppt.run(3, 'Dr. Meena Patel',  soon(3, 14), 'Chemo cycle 3',         'Oncology Day Unit',       'scheduled', now());
+insAppt.run(6, 'Dr. James Carter', soon(5, 10), 'Nephrology coordination','Telehealth',             'scheduled', now());
 
 db.close();
 console.log('✔ Seeded database at', DB_PATH);
