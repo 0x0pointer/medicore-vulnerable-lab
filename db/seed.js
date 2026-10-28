@@ -79,6 +79,19 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE prescriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    drug TEXT NOT NULL,
+    dose TEXT,
+    frequency TEXT,
+    notes TEXT,                      -- rendered unsanitized on the client
+    prescriber TEXT,
+    pharmacy_url TEXT,               -- where refill notifications are POSTed
+    status TEXT DEFAULT 'active',
+    created_at TEXT NOT NULL
+  );
+
   CREATE TABLE appointments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     patient_id INTEGER NOT NULL,
@@ -146,6 +159,14 @@ const insMsg = db.prepare(
 );
 insMsg.run('Dr. Alice Reed', 'Reminder: quarterly compliance training is due Friday.', now());
 insMsg.run('Tom Hill (Billing)', 'Insurance pre-auth for MRN-100455 is pending.', now());
+
+const insRx = db.prepare(
+  `INSERT INTO prescriptions (patient_id, drug, dose, frequency, notes, prescriber, pharmacy_url, status, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+);
+insRx.run(1, 'Apixaban',   '5 mg',   'twice daily',  'Hold 48h before any procedure.', 'Dr. James Carter', 'https://pharmacy.medicore.test/webhook', 'active', now());
+insRx.run(2, 'Metformin',  '500 mg', 'twice daily',  'Take with meals.',               'Dr. James Carter', 'https://pharmacy.medicore.test/webhook', 'active', now());
+insRx.run(6, 'Furosemide', '40 mg',  'once daily',   'Monitor potassium.',             'Dr. James Carter', 'https://pharmacy.medicore.test/webhook', 'active', now());
 
 const soon = (days, hour) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
 const insAppt = db.prepare(

@@ -30,9 +30,22 @@ if (!fs.existsSync(DB_PATH)) {
 }
 const db = new Database(DB_PATH);
 
-// Ensure the appointments table exists even on an older seeded database,
-// so this feature branch runs without re-seeding.
+// Ensure the feature tables exist even on an older seeded database,
+// so these feature branches run without re-seeding.
 db.exec(`
+  CREATE TABLE IF NOT EXISTS prescriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    drug TEXT NOT NULL,
+    dose TEXT,
+    frequency TEXT,
+    notes TEXT,
+    prescriber TEXT,
+    pharmacy_url TEXT,
+    status TEXT DEFAULT 'active',
+    created_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS appointments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     patient_id INTEGER NOT NULL,
@@ -293,6 +306,93 @@ app.post('/api/admin/network-check', requireLogin, (req, res) => {
 });
 
 // =========================================================================
+
+// =========================================================================
+//  PRESCRIPTIONS  (feature: prescriptions & pharmacy notifications)
+// =========================================================================
+
+app.get('/api/prescriptions', requireLogin, (req, res) => {
+  const pid = req.query.patient_id;
+  const rows = pid
+    ? db.prepare('SELECT * FROM prescriptions WHERE patient_id = ? ORDER BY id DESC').all(pid)
+    : db.prepare('SELECT * FROM prescriptions ORDER BY id DESC').all();
+  res.json(rows);
+});
+
+/*
+ * Create a prescription.
+ *
+ * VULN #11 — Mass Assignment: the whole request body is spread into the
+ *            INSERT, so a client can set columns the form never exposes
+ *            (e.g. prescriber, status, or a future `approved` flag) and
+ *            impersonate another clinician.                    (CWE-915)
+ *
+ * VULN #1 (same class as login) — the values are concatenated into the SQL
+ *            string, so every field is also a SQL-injection sink. (CWE-89)
+ */
+app.post('/api/prescriptions', requireLogin, (req, res) => {
+  const rx = {
+    patient_id: req.body.patient_id,
+    drug: req.body.drug,
+    dose: req.body.dose,
+    frequency: req.body.frequency,
+    notes: req.body.notes,
+    prescriber: req.user.name,
+    pharmacy_url: req.body.pharmacy_url || 'https://pharmacy.medicore.test/webhook',
+    status: 'active',
+    ...req.body, // <-- client-supplied fields win, overriding the defaults above
+    created_at: new Date().toISOString(),
+  };
+  const cols = Object.keys(rx);
+  const sql =
+    `INSERT INTO prescriptions (${cols.join(', ')}) VALUES (${cols.map((c) => `'${rx[c]}'`).join(', ')})`;
+  try {
+    const info = db.prepare(sql).run();
+    res.json({ id: info.lastInsertRowid, ...rx });
+  } catch (err) {
+    res.status(500).json({ error: err.message, sql });
+  }
+});
+
+/*
+ * VULN #12 — Server-Side Code Injection: the "dosage calculator" evaluates
+ *            a user-supplied weight-based formula with eval(). A formula of
+ *            `require('child_process').execSync('id').toString()` runs
+ *            arbitrary code on the server.                      (CWE-94)
+ */
+app.post('/api/prescriptions/calc-dose', requireLogin, (req, res) => {
+  const { weight = 0, formula = 'weight * 0.5' } = req.body;
+  try {
+    const result = eval(formula); // weight is in scope for the formula
+    res.json({ formula, weight, result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/*
+ * VULN #13 — Server-Side Request Forgery: to "notify the pharmacy", the
+ *            server makes an outbound request to a URL supplied by the
+ *            client. Point it at http://169.254.169.254/… (cloud metadata)
+ *            or an internal service and the response is reflected back.
+ *                                                               (CWE-918)
+ */
+app.post('/api/prescriptions/notify-pharmacy', requireLogin, async (req, res) => {
+  const target = req.body.pharmacy_url || req.body.url;
+  if (!target) return res.status(400).json({ error: 'pharmacy_url required' });
+  try {
+    const r = await fetch(target, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'refill', rx: req.body.rx || null }),
+    });
+    const text = await r.text();
+    // The raw upstream response is handed straight back to the caller.
+    res.json({ target, status: r.status, body: text.slice(0, 2000) });
+  } catch (err) {
+    res.status(502).json({ error: err.message, target });
+  }
+});
 
 // =========================================================================
 //  APPOINTMENTS  (feature: scheduling & telehealth)

@@ -56,7 +56,7 @@ let ME = null;
 function switchView(view) {
   document.querySelectorAll('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.view === view));
   document.getElementById('sidebar').classList.remove('open');
-  ({ dashboard: viewDashboard, patients: viewPatients, records: viewRecords, messages: viewMessages, appointments: viewAppointments, admin: viewAdmin }[view] || viewDashboard)();
+  ({ dashboard: viewDashboard, patients: viewPatients, records: viewRecords, messages: viewMessages, prescriptions: viewPrescriptions, appointments: viewAppointments, admin: viewAdmin }[view] || viewDashboard)();
 }
 
 // ---- Dashboard -----------------------------------------------
@@ -315,6 +315,93 @@ async function renderMessages() {
       <div class="m-body"><div class="m-head"><strong>${m.author}</strong> · ${fmt(m.created_at)}</div>
       <div class="m-text">${m.body}</div></div>
     </div>`).join('');
+}
+
+// ---- Prescriptions -------------------------------------------
+async function viewPrescriptions() {
+  content.innerHTML = `
+    <div class="page-head"><div><h1>Prescriptions</h1><p>Active medication orders and the weight-based dosage calculator.</p></div></div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Active prescriptions</h3><span class="sub" id="rxCount"></span></div>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Drug</th><th>Dose</th><th>Frequency</th><th>Prescriber</th><th>Notes</th></tr></thead>
+          <tbody id="rxBody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+      <div class="card card-pad">
+        <div class="section-title">Dosage calculator</div>
+        <p style="font-size:13px;color:var(--text-soft);margin:0 0 6px">Weight-based dose. <code>weight</code> (kg) is available in the formula.</p>
+        <form class="inline-form" id="doseForm" style="flex-wrap:wrap">
+          <input id="doseWeight" type="number" placeholder="weight (kg)" value="70" style="max-width:130px" />
+          <input id="doseFormula" placeholder="weight * 0.5" value="weight * 0.5" />
+          <button class="btn btn-ghost btn-sm" type="submit">Calculate</button>
+        </form>
+        <div class="code-out" id="doseOut">Enter a weight and formula.</div>
+
+        <div class="section-title" style="margin-top:22px">Add prescription</div>
+        <form id="rxForm" style="display:grid;gap:8px">
+          <input id="rxDrug" placeholder="Drug (e.g. Amoxicillin)" />
+          <div style="display:flex;gap:8px">
+            <input id="rxDose" placeholder="Dose (e.g. 500 mg)" />
+            <input id="rxFreq" placeholder="Frequency" />
+          </div>
+          <input id="rxPatient" type="number" placeholder="Patient id (e.g. 1)" value="1" />
+          <input id="rxNotes" placeholder="Notes" />
+          <button class="btn btn-primary btn-sm" type="submit">Add prescription</button>
+        </form>
+      </div>
+    </div>`;
+
+  await renderPrescriptions();
+
+  document.getElementById('doseForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = document.getElementById('doseOut');
+    out.textContent = 'Calculating…';
+    // VULN #12 — formula is evaluated server-side with eval().
+    const r = await api('/api/prescriptions/calc-dose', {
+      method: 'POST',
+      body: JSON.stringify({
+        weight: Number(document.getElementById('doseWeight').value),
+        formula: document.getElementById('doseFormula').value,
+      }),
+    });
+    out.textContent = r.error ? ('Error: ' + r.error) : (r.formula + '  →  ' + r.result);
+  });
+
+  document.getElementById('rxForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await api('/api/prescriptions', {
+      method: 'POST',
+      body: JSON.stringify({
+        patient_id: Number(document.getElementById('rxPatient').value),
+        drug: document.getElementById('rxDrug').value,
+        dose: document.getElementById('rxDose').value,
+        frequency: document.getElementById('rxFreq').value,
+        notes: document.getElementById('rxNotes').value,
+      }),
+    });
+    document.getElementById('rxForm').reset();
+    document.getElementById('rxPatient').value = '1';
+    await renderPrescriptions();
+  });
+}
+
+async function renderPrescriptions() {
+  const body = document.getElementById('rxBody');
+  const rows = await api('/api/prescriptions');
+  document.getElementById('rxCount').textContent = `${rows.length} order${rows.length === 1 ? '' : 's'}`;
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="empty">No prescriptions.</td></tr>'; return; }
+  // VULN #2 (same class) — drug/notes rendered as raw HTML.
+  body.innerHTML = rows.map((r) => `
+    <tr>
+      <td style="font-weight:600">${r.drug}</td>
+      <td>${esc(r.dose || '—')}</td>
+      <td>${esc(r.frequency || '—')}</td>
+      <td>${esc(r.prescriber || '—')}</td>
+      <td style="color:var(--text-soft)">${r.notes || ''}</td>
+    </tr>`).join('');
 }
 
 // ---- Appointments --------------------------------------------

